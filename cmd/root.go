@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"runtime/debug"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -33,6 +34,22 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&maxTlsString, "maxtls", "1.3", "Maximum TLS version to accept")
 	rootCmd.PersistentFlags().IntVar(&maxProcs, "threads", runtime.NumCPU(), "Default concurrent checks")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Log failed domains")
+
+	if info, ok := debug.ReadBuildInfo(); ok {
+		vcsRev := "unknown"
+		vcsTime := "unknown"
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				vcsRev = s.Value
+			case "vcs.time":
+				vcsTime = s.Value
+			}
+		}
+		rootCmd.Version = fmt.Sprintf("%s (%s, built at %s)", info.Main.Version, vcsRev, vcsTime)
+	} else {
+		rootCmd.Version = "unknown"
+	}
 }
 
 var rootCmd = &cobra.Command{
