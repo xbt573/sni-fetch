@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/xbt573/sni-fetch/internal/bgp"
 	"github.com/xbt573/sni-fetch/internal/check"
+	"golang.org/x/sync/semaphore"
 )
 
 var (
@@ -56,8 +58,6 @@ var rootCmd = &cobra.Command{
 	Use:  "sni-fetch",
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		runtime.GOMAXPROCS(maxProcs)
-
 		version, ok := tlsVersions[minTlsString]
 		if !ok {
 			return fmt.Errorf("invalid TLS version: %v", minTlsString)
@@ -85,17 +85,17 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		sem := make(chan any, maxProcs)
+		sem := semaphore.NewWeighted(int64(maxProcs))
 		wg := sync.WaitGroup{}
 
 		for _, domain := range domains {
 			wg.Add(1)
 
 			go func() {
-				sem <- nil
+				sem.Acquire(context.TODO(), 1)
 
 				defer wg.Done()
-				defer func() { <-sem }()
+				defer sem.Release(1)
 
 				res, err := check.Check("https://"+domain, check.Opts{
 					HTTP2:  http2,
