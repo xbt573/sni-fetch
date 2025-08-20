@@ -1,14 +1,12 @@
 package util
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
-	"time"
-	"unicode"
+	"strings"
 
-	"golang.org/x/net/idna"
+	"github.com/xbt573/sni-fetch/internal/check"
 )
 
 var strtotls = map[string]uint16{
@@ -16,6 +14,13 @@ var strtotls = map[string]uint16{
 	"1.1": tls.VersionTLS11,
 	"1.2": tls.VersionTLS12,
 	"1.3": tls.VersionTLS13,
+}
+
+var tlstostr = map[uint16]string{
+	tls.VersionTLS10: "tls1.0",
+	tls.VersionTLS11: "tls1.1",
+	tls.VersionTLS12: "tls1.2",
+	tls.VersionTLS13: "tls1.3",
 }
 
 func StringToTLSVersion(x string) (res uint16, err error) {
@@ -27,28 +32,56 @@ func StringToTLSVersion(x string) (res uint16, err error) {
 	return
 }
 
-// LookupHost is net.LookupHost with automatic IDNA conversion and timeout
-func LookupHost(host string) (addrs []string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3) // sensible default
-	defer cancel()
+func TLSVersionName(x uint16) string {
+	res, ok := tlstostr[x]
+	if !ok {
+		return "unknowntls"
+	}
 
-	isascii := true
+	return res
+}
 
-	for i := 0; i < len(host); i++ {
-		if host[i] > unicode.MaxASCII {
-			isascii = false
+func Format(domain string, subnet *net.IPNet, result check.Result, ips bool) string {
+	modifiers := []string{}
+
+	if result.HTTP2 {
+		modifiers = append(modifiers, "http2")
+	}
+
+	modifiers = append(modifiers, TLSVersionName(result.TLSVersion))
+
+	if !result.Successful {
+		modifiers = append(modifiers, "non-200")
+	}
+
+	if !result.TLSAvailable {
+		modifiers = append(modifiers, "non-tls")
+	} else {
+		if !result.TLSVerified {
+			modifiers = append(modifiers, "self-signed")
+		}
+	}
+
+	isSubnet := false
+
+	for _, str := range result.IPs {
+		if subnet.Contains(net.ParseIP(str)) {
+			isSubnet = true
 			break
 		}
 	}
 
-	if !isascii {
-		conv, err := idna.ToASCII(host)
-		if err != nil {
-			return nil, err
-		}
-
-		host = conv
+	if !isSubnet {
+		modifiers = append(modifiers, "othersubnet")
 	}
 
-	return net.DefaultResolver.LookupHost(ctx, host)
+	if ips {
+		modifiers = append(modifiers, strings.Join(result.IPs, " "))
+	}
+
+	if !result.Available {
+		modifiers = []string{"failure"}
+	}
+
+	return fmt.Sprintf("%v: %v", domain, strings.Join(modifiers, " "))
 }

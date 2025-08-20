@@ -1,15 +1,22 @@
 package check
 
 import (
+	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
+	"unicode"
 
 	"golang.org/x/net/http2"
+	"golang.org/x/net/idna"
 )
 
 type Result struct {
-	Available bool
+	Available  bool
+	Successful bool
+	IPs        []string
 
 	HTTP2 bool
 
@@ -27,7 +34,33 @@ type Opts struct {
 	MaxTLS uint16
 }
 
-func Check(url string, opts Opts) (*Result, error) {
+// lookupHost is net.lookupHost with automatic IDNA conversion and timeout
+func lookupHost(host string) (addrs []string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3) // sensible default
+	defer cancel()
+
+	isascii := true
+
+	for i := 0; i < len(host); i++ {
+		if host[i] > unicode.MaxASCII {
+			isascii = false
+			break
+		}
+	}
+
+	if !isascii {
+		conv, err := idna.ToASCII(host)
+		if err != nil {
+			return nil, err
+		}
+
+		host = conv
+	}
+
+	return net.DefaultResolver.LookupHost(ctx, host)
+}
+
+func Check(uri string, opts Opts) (*Result, error) {
 	if opts.Timeout == 0 {
 		opts.Timeout = time.Second * 3
 	}
@@ -39,6 +72,20 @@ func Check(url string, opts Opts) (*Result, error) {
 	if opts.MaxTLS == 0 {
 		opts.MaxTLS = tls.VersionTLS13
 	}
+
+	result := &Result{}
+
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return nil, err
+	}
+
+	ips, err := lookupHost(parsed.Hostname())
+	if err != nil {
+		return nil, err
+	}
+
+	result.IPs = ips
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
@@ -60,7 +107,7 @@ func Check(url string, opts Opts) (*Result, error) {
 		Timeout:   opts.Timeout,
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", uri, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -71,12 +118,11 @@ func Check(url string, opts Opts) (*Result, error) {
 	}
 	res.Body.Close()
 
-	result := &Result{}
-
+	result.Available = true
 	result.TLSVersion = res.TLS.Version
 
 	if res.StatusCode == http.StatusOK {
-		result.Available = true
+		result.Successful = true
 	}
 
 	if res.TLS != nil {

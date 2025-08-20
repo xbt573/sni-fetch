@@ -2,12 +2,10 @@ package cmd
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net"
 	"runtime"
 	"runtime/debug"
-	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -108,48 +106,12 @@ var rootCmd = &cobra.Command{
 				})
 				if err != nil {
 					if config.Failed {
-						str := fmt.Sprintf("%v: failure", domain)
-
-						if config.Verbose {
-							ips, err := util.LookupHost(domain)
-							if err == nil {
-								str += strings.Join(ips, " ") + " "
-							}
-						}
-
-						fmt.Printf("%v: failure\n", domain)
+						fmt.Println(util.Format(domain, subnet, *res, config.Verbose))
 					}
 					return
 				}
 
-				str := domain + ": "
-
-				if config.Verbose {
-					ips, err := util.LookupHost(domain)
-					if err == nil {
-						str += strings.Join(ips, " ") + " "
-					}
-				}
-
-				if !res.Available {
-					str += "not-200 "
-				}
-
-				if res.HTTP2 {
-					str += "http2 "
-				}
-
-				if res.TLSAvailable {
-					str += tls.VersionName(res.TLSVersion) + " "
-
-					if !res.TLSVerified {
-						str += "selfsigned "
-					}
-				} else {
-					str += "notls "
-				}
-
-				fmt.Println(str)
+				fmt.Println(util.Format(domain, subnet, *res, config.Verbose))
 			}()
 		}
 
